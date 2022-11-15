@@ -8,56 +8,65 @@ class Generator(nn.Module):
 
         self.opt = opt
 
+        #recent模块，自定义模块GCGRU
         self.recent_network = GCGRUModel(opt)
+        #长期模块 输入大小为opt['num_feature']
         self.trend_network = \
             nn.LSTM(input_size=opt['num_feature'], hidden_size=opt['hidden_dim'], num_layers=opt['num_layer'],
                     batch_first=True)
-
+        # recent模块 全连接神经网层
         self.recent_fc = nn.Sequential(
             nn.Linear(in_features=opt['hidden_dim'] * opt['num_adj'] // 2, out_features=opt['hidden_dim']),
             nn.ReLU(),
         )
-
+        # 全连接神经网络层 trend模块
         self.trend_fc = nn.Sequential(
             nn.Linear(in_features=opt['hidden_dim'], out_features=opt['hidden_dim']),
             nn.ReLU(),
         )
-
+        #全连接层 外部特征模块
         self.feature_fc = nn.Sequential(
             nn.Linear(in_features=opt['time_feature'], out_features=opt['hidden_dim']),
             nn.ReLU(),
         )
 
+        #
+        #fusion层
         self.fc = nn.Sequential(
             nn.Linear(in_features=int(opt['hidden_dim'] * 2.5), out_features=opt['hidden_dim']),
             nn.ReLU(),
             nn.Linear(in_features=opt['hidden_dim'], out_features=opt['num_feature']),
             nn.Tanh()
         )
-
+        #Gcn
         self.gcn = GCN(opt, input_size=int(opt['hidden_dim'] * 2.5), output_size=opt['num_feature'], activation='tanh')
 
     def forward(self, recent_data, trend_data, sub_graph, time_feature):
         """Generator
-        :param recent_data: (B, seq_len, num_node, input_dim)
-        :param trend_data: (B, seq_len, input_dim)
-        :param sub_graph: (B, num_nodes, num_nodes)
+        :param recent_data: (B, seq_len, num_node, input_dim) #序列长度，点数量，输入维度(T,n,F)
+        :param trend_data: (B, seq_len, input_dim)(T,F)
+        :param sub_graph: (B, num_nodes, num_nodes)(n,n)
         :param time_feature: (B, time_features)
         :return
         - Output: `2-D` tensor with shape `(B, input_dim)`
         """
-        batch_size = recent_data.shape[0]
+
+        batch_size = recent_data.shape[0]      #B是批处理大小
+        #1
         recent, _ = self.recent_network(recent_data, sub_graph)  # (B, num_adj, rnn_units)
-
+        #2
         trend, _ = self.trend_network(trend_data)  # (B, seq_len, hidden_dim)
+        #提取最后一个时间步
         trend = trend[:, -1, ].view(batch_size, 1, -1)  # (B, hidden_dim) --> (B, 1, hidden_dim)
+        #这样做是为了将每个样本的最后一个时间步的数据扩展到与 recent 数据相同的维度，以便后续的拼接操作。
         trend = trend.repeat(1, self.opt['num_adj'], 1)  # (B, num_adj, hidden_dim)
-
+        #3
         feature_fc = self.feature_fc(time_feature).view(batch_size, 1, -1)  # (B, hidden_dim) --> (B, 1, hidden_dim)
         feature_fc = feature_fc.repeat(1, self.opt['num_adj'], 1)  # (B, num_adj, hidden_dim)
-
+        #4
+        #沿着第二个维度进行拼接
         combined = torch.cat([recent, trend, feature_fc], dim=2)
-
+        #5
         output = self.gcn(combined, sub_graph)
 
         return output
@@ -70,19 +79,21 @@ class Discriminator(nn.Module):
 
         self.opt = opt
         self.T_recent = self.opt['recent_time'] * self.opt['timestamp']
-
+        #GCN
         self.gcn = GCN(opt, input_size=opt['num_feature'], output_size=opt['hidden_dim'])
 
+        #GCGRU
         self.seq_network = GCGRUModel(opt)
+        #FC
         self.seq_fc = nn.Sequential(
             nn.Linear(in_features=opt['hidden_dim'] * opt['num_adj'] // 2, out_features=opt['hidden_dim']),
             nn.ReLU(),
         )
-
+        #？
         self.trend_network = \
             nn.LSTM(input_size=opt['num_feature'], hidden_size=opt['hidden_dim'], num_layers=opt['num_layer'],
                     batch_first=True)
-
+        #fusion
         self.output = nn.Sequential(
             nn.Linear(in_features=opt['hidden_dim'] * 2, out_features=opt['hidden_dim']),
             nn.ReLU(),
@@ -98,7 +109,10 @@ class Discriminator(nn.Module):
         :return
         - Output: `2-D` tensor with shape `(B, 2)`
         """
+        #GCGRU
         seq, hid = self.seq_network(sequence[:, :-1, ], sub_graph)  # (B, num_adj, rnn_units)
+        #将 seq 张量的形状从 (B, num_adj, rnn_units) 改变为 (B, num_adj * rnn_units)，然后通过 self.seq_fc 进行线性变换，得到 seq_fc 张量，形状为 (B, hidden_dim)，其中 hidden_dim 是全连接层的输出维度
+        #FC
         seq_fc = self.seq_fc(seq.view(sequence.shape[0], -1))  # (B, hidden_dim)
 
         gcn = self.gcn(sequence[:, -1, ], sub_graph)  # (B, num_adj, hidden_dim)
