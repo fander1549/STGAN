@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-#123
+#123123
 class Generator(nn.Module):
 
     def __init__(self, opt):
