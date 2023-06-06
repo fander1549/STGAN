@@ -51,12 +51,13 @@ class Trainer(object):
 
                 # ---------------------
                 #  Train Discriminator
-                # ---------------------
+                # ---------------------、
                 self.D_optim.zero_grad()
-                real_sequence = torch.cat([recent_data, real_data.unsqueeze(1)], dim=1)  # (batch_size, time, num_adj, input_size)
-                fake_data = self.G(recent_data, trend_data, sub_graph, time_feature)
+                #unsqueeze-》增加某一个维度，该维度大小设为1 （batch，1，num_adj,input_size）,(batch,time,node_num,input_size)
+                real_sequence = torch.cat([recent_data, real_data.unsqueeze(1)], dim=1)  # (batch_size, time+1, num_adj, input_size)
+                fake_data = self.G(recent_data, trend_data, sub_graph, time_feature)#GCN的输出
 
-                fake_sequence = torch.cat([recent_data, fake_data.unsqueeze(1)], dim=1)
+                fake_sequence = torch.cat([recent_data, fake_data.unsqueeze(1)], dim=1)  # (batch_size, time+1, num_adj, input_size)
 
                 real_score_D = self.D(real_sequence, sub_graph, trend_data)
                 fake_score_D = self.D(fake_sequence, sub_graph, trend_data)

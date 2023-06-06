@@ -8,7 +8,7 @@ class data_loader(data.Dataset):
 
         self.opt = opt
 
-        data_path = opt['data_path'] + '/data.npy'     # traffic data
+        data_path = opt['data_path'] + '/data.npy'     # traffic data time*num_node
         feature_path = opt['data_path'] + '/time_features.txt'     # time feature
         graph_path = opt['data_path'] + '/node_subgraph.npy'     # (num_node, n, n), the subgraph of each node
         adj_path = opt['data_path'] + '/node_adjacent.txt'     # (num_node, n), the adjacent of each node
@@ -20,16 +20,19 @@ class data_loader(data.Dataset):
         print('traffic data: ', self.data.shape)
 
         # direction subgraph, no self connect
-        self.T_recent = opt['recent_time'] * opt['timestamp']
-        self.T_trend = opt['trend_time'] * opt['timestamp']
+        self.T_recent = opt['recent_time'] * opt['timestamp'] #          recent_time=2
+        self.T_trend = opt['trend_time'] * opt['timestamp']#            trend_time=7*24
+        #如果还未训练
         if opt['isTrain']:
-            self.start_time = self.T_trend
+            self.start_time = self.T_trend #7*24*2 相当于与从第七天开始
+            #opt['train_time'] = opt['train_time'] * opt['timestamp'] * 24  289*2*24
             self.time_num = opt['train_time'] - self.start_time
         else:
-            self.start_time = opt['train_time']
-            self.time_num = self.data.shape[0] - self.start_time
+            #如果训练完成，开始测试
+            self.start_time = opt['train_time']#开始时间为训练时间
+            self.time_num = self.data.shape[0] - self.start_time#训练总时间为总时间-训练时间（测试时间）
 
-        self.input_size = self.data.shape[2] * self.data.shape[3]
+        self.input_size = self.data.shape[2] * self.data.shape[3]#2*2？
 
         self.adj_num = self.adjs.shape[1]
         self.node_num = self.data.shape[1]
@@ -42,17 +45,18 @@ class data_loader(data.Dataset):
 
     def __getitem__(self, idx):
 
-        index_t = idx // self.node_num + self.start_time
+        index_t = idx // self.node_num + self.start_time#确定所处的具体时间片
         index_r = idx % self.node_num
 
         # recent_data: (time, sub_graph, num_feature)
         recent_data = torch.zeros((self.T_recent, self.adj_num, self.input_size))
         real_data = torch.zeros((self.adj_num, self.input_size))
 
-        # recent
+        # recent,填入数据
         for i in range(self.adj_num):
-            recent_data[:, i, :] = self.data[index_t - self.T_recent:index_t, self.adjs[index_r, i], :, :].view(
+            recent_data[:, i, :] = self.data[index_t - self.T_recent   :   index_t, self.adjs[index_r, i], :, :].view(
                 self.T_recent, -1)
+            #adj_num*4
             real_data[i, :] = self.data[index_t, self.adjs[index_r, i], :, :].view(-1)
 
         # trend
