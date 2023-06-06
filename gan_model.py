@@ -110,9 +110,11 @@ class Discriminator(nn.Module):
         - Output: `2-D` tensor with shape `(B, 2)`
         """
         #GCGRU
+        #因此，sequence[:, :-1, ] 会返回一个形状为 (B, seq_len-1, num_node, input_dim) 的张量
         seq, hid = self.seq_network(sequence[:, :-1, ], sub_graph)  # (B, num_adj, rnn_units)
         #将 seq 张量的形状从 (B, num_adj, rnn_units) 改变为 (B, num_adj * rnn_units)，然后通过 self.seq_fc 进行线性变换，得到 seq_fc 张量，形状为 (B, hidden_dim)，其中 hidden_dim 是全连接层的输出维度
         #FC
+        #此处的-1代表自动计算
         seq_fc = self.seq_fc(seq.view(sequence.shape[0], -1))  # (B, hidden_dim)
 
         gcn = self.gcn(sequence[:, -1, ], sub_graph)  # (B, num_adj, hidden_dim)
@@ -142,7 +144,10 @@ class GCN(nn.Module):
         :return
         - Output: `3-D` tensor with shape `(B, num_nodes, rnn_units)`
         """
+        #x为输入数据
+        #批次矩阵乘法 torch.bmm(A, x) 将输入数据 x 与邻接矩阵 A 进行乘法运算。这实际上是对输入数据 x 在图结构上进行卷积操作，根据邻接矩阵定义了节点之间的连接关系。
         x = torch.bmm(A, x)  # (B, num_nodes, input_dim)
+        #乘法运算的结果输入到全连接层 self.fc 中进行线性变换。全连接层将输入的维度从 input_dim 映射到 output_size，
         x = self.fc(x)
 
         return self.activation(x)  # (B, num_nodes, rnn_units)
@@ -158,26 +163,29 @@ class GCGRUCell(torch.nn.Module):
         self.u_gconv = GCN(opt, input_size=input_size, output_size=rnn_units)
         self.c_gconv = GCN(opt, input_size=input_size, output_size=rnn_units, activation='tanh')
 
-    def forward(self, x, h, A):
-        """Gated recurrent unit (GRU) with Graph Convolution.
-        :param inputs: (B, num_nodes, input_dim)
-        :param hx: (B, num_nodes, rnn_units)
-        :param norm_adj: (B, num_nodes, num_nodes)
-        :return
-        - Output: A `3-D` tensor with shape `(B, num_nodes, rnn_units)`.
-        """
-        x_h = torch.cat([x, h], dim=2)
+        def forward(self, x, h, A):
+            """Gated recurrent unit (GRU) with Graph Convolution.
+            :param inputs: (B, num_nodes, input_dim)
+            :param hx: (B, num_nodes, rnn_units)
+            :param norm_adj: (B, num_nodes, num_nodes)
+            :return
+            - Output: A `3-D` tensor with shape `(B, num_nodes, rnn_units)`.
+            """
+            #在某一维度上进行拼接  (B, num_nodes, input_dim + rnn_units)。
+            x_h = torch.cat([x, h], dim=2)
+            #计算重置门以及更新们 (B, num_nodes, rnn_units)
+            r = self.r_gconv(x_h, A)
+            u = self.u_gconv(x_h, A)
+            #进行拼接 (B, num_nodes, input_dim + rnn_units)。 逐个元素相乘
+            #看作是对过去状态 h 进行加权调节，其中权重由重置门 r 决定。乘积结果反映了过去状态的重要性以及保留或遗忘过去状态的程度。
+            x_rh = torch.cat([x, r * h], dim=2)
+            #图卷积操作 (B, num_nodes, rnn_units)
+            c = self.c_gconv(x_rh, A)
 
-        r = self.r_gconv(x_h, A)
-        u = self.u_gconv(x_h, A)
+            #1.0 - u) * c 表示对新状态 c 进行加权调节，其中权重由更新门的补数 1.0 - u 决定。乘积结果体现了新状态的重要性以及对过去状态的补充或替代程度。
+            h = u * h + (1.0 - u) * c
 
-        x_rh = torch.cat([x, r * h], dim=2)
-
-        c = self.c_gconv(x_rh, A)
-
-        h = u * h + (1.0 - u) * c
-
-        return h
+            return h
 
 
 class GCGRUModel(nn.Module):
