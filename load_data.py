@@ -4,6 +4,7 @@ import numpy as np
 
 class data_loader(data.Dataset):
 
+
     def __init__(self, opt):
 
         self.opt = opt

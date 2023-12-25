@@ -6,7 +6,9 @@ import numpy as np
 import logging
 
 class Tester(object):
+
     def __init__(self, opt):
+
 
         self.opt = opt
 
